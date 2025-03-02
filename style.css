@@ -1,0 +1,38 @@
+.fuzzysearch-input {
+    padding: 8px !important;
+    width: 100% !important;
+    max-width: 300px !important;
+    border: 1px solid #ccc !important;
+    border-radius: 4px !important;
+    font-size: 14px !important;
+}
+
+.fuzzysearch-results {
+    list-style: none !important;
+    padding: 0 !important;
+    margin: 10px 0 !important;
+    max-height: 200px !important;
+    overflow-y: auto !important;
+}
+
+.fuzzysearch-results li {
+    padding: 8px !important;
+    background-color: #f9f9f9 !important;
+    border-bottom: 1px solid #ddd !important;
+}
+
+.fuzzysearch-results li:hover,
+.fuzzysearch-results li.highlighted {
+    background-color: #e9e9e9 !important; /* Highlighted item */
+    cursor: pointer !important;
+}
+
+.fuzzysearch-results a {
+    text-decoration: none !important;
+    color: #007bff !important;
+    display: block !important; /* Ensure link fills the li */
+}
+
+.fuzzysearch-results a:hover {
+    text-decoration: underline !important;
+}
