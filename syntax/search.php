@@ -17,11 +17,7 @@ class syntax_plugin_fuzzysearch_search extends DokuWiki_Syntax_Plugin {
             $renderer->doc .= '<input type="text" id="fuzzysearch-input" class="fuzzysearch-input" placeholder="Search pages..." />';
             $renderer->doc .= '<ul id="fuzzysearch-results" class="fuzzysearch-results"></ul>';
             $renderer->doc .= '</div>';
-            static $assets_added = false;
-            if (!$assets_added) {
-                $renderer->doc .= '<script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>';
-                $assets_added = true;
-            }
+            // Removed CDN Fuse.js include; rely on local version loaded via action plugin for consistency
         }
         return true;
     }

@@ -1,8 +1,8 @@
 base   fuzzysearch
 author dodotori @ dokuwikiforum
 email  dodotori @ dokuwikiforum
-date   2025-03-14
+date   2025-09-28
 name   Fuzzy Search
-desc   Adds a fuzzy search input (FUZZYSEARCH) using Fuse.js for typo-tolerant page searching and Obsidian-style link adding method [[work]] to initiate fuzzy search and allow easy link creation in Dokuwiki
+desc   Adds a fuzzy search input (FUZZYSEARCH) using Fuse.js for typo-tolerant page searching and Obsidian-style link adding method [[work]] to initiate fuzzy search and allow easy link creation in Dokuwiki. Improved with admin configs for ACL restriction, fuzziness, and result limits.
 url    https://www.dokuwiki.org/plugin:fuzzysearch
 type   syntax,action

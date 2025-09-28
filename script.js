@@ -1,6 +1,4 @@
 document.addEventListener('DOMContentLoaded', function () {
-    ////console.log('FuzzySearch original script loaded');
-
     const input = document.getElementById('fuzzysearch-input');
     const resultsList = document.getElementById('fuzzysearch-results');
 
@@ -11,6 +9,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     let fuse, currentIndex = -1;
 
+    // Fetch pages and init Fuse with config
     fetch(DOKU_BASE + 'lib/exe/ajax.php?call=fuzzysearch_pages', {
         method: 'GET',
         credentials: 'same-origin'
@@ -22,7 +21,7 @@ document.addEventListener('DOMContentLoaded', function () {
     .then(data => {
         fuse = new Fuse(data, {
             keys: ['title'],
-            threshold: 0.4,
+            threshold: FUZZYSEARCH_CONFIG.threshold, // Admin-configured fuzziness
             includeScore: true
         });
 
@@ -33,7 +32,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
             if (query.length === 0) return;
 
-            const results = fuse.search(query);
+            const results = fuse.search(query, { limit: FUZZYSEARCH_CONFIG.limit }); // Admin-configured limit
+            if (results.length === 0) {
+                resultsList.innerHTML = '<li>No matches found</li>';
+                return;
+            }
+
             results.forEach((result, index) => {
                 const page = result.item;
                 const li = document.createElement('li');
@@ -41,9 +45,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 li.dataset.index = index;
                 resultsList.appendChild(li);
             });
-            if (results.length === 0) {
-                resultsList.innerHTML = '<li>No matches found</li>';
-            }
         });
 
         input.addEventListener('keydown', function (e) {
@@ -83,7 +84,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     })
     .catch(error => {
-       // console.error('Error fetching page data:', error);
+        console.error('Error fetching page data:', error);
         resultsList.innerHTML = '<li>Error loading search data</li>';
     });
 });

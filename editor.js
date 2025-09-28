@@ -1,5 +1,58 @@
 document.addEventListener('DOMContentLoaded', function () {
+    // Utility function to get relative caret coordinates in a textarea
+    // Uses a mirror div technique for accurate positioning, accounting for styles, wrapping, and scroll
+    // Returns {top, left} relative to the content box (after padding)
+    function getCaretCoordinates(element, position) {
+        try {
+            const style = getComputedStyle(element);
+            const div = document.createElement('div');
+
+            // Set essential styles for accurate mirroring (font, padding, etc.) for a clean, modern feel
+            div.style.position = 'absolute'; // Offscreen positioning
+            div.style.visibility = 'hidden'; // No visual flash
+            div.style.left = '-9999px';
+            div.style.top = '0';
+            div.style.width = element.clientWidth + 'px'; // Match width for wrapping
+            div.style.height = element.clientHeight + 'px'; // Not strictly needed but for consistency
+            div.style.padding = style.padding;
+            div.style.font = style.font;
+            div.style.fontSize = style.fontSize;
+            div.style.fontFamily = style.fontFamily;
+            div.style.lineHeight = style.lineHeight;
+            div.style.letterSpacing = style.letterSpacing;
+            div.style.wordSpacing = style.wordSpacing;
+            div.style.whiteSpace = 'pre-wrap'; // Handle newlines and wrapping
+            div.style.wordWrap = 'break-word';
+            div.style.overflowWrap = 'break-word';
+            div.style.textTransform = style.textTransform;
+            div.style.boxSizing = style.boxSizing;
+            div.style.border = style.border; // Include border for precise bounding
+
+            // Set content up to caret position
+            div.textContent = element.value.substring(0, position);
+
+            // Marker span at caret position (empty for precise location)
+            const span = document.createElement('span');
+            // span.textContent = '\u200b'; // Zero-width space if needed for dimension, but empty works
+            div.appendChild(span);
+
+            // Append to body, measure, remove
+            document.body.appendChild(div);
+            const coords = {
+                top: span.offsetTop + parseInt(style.paddingTop) - element.scrollTop,
+                left: span.offsetLeft + parseInt(style.paddingLeft) - element.scrollLeft
+            };
+            div.remove();
+
+            return coords;
+        } catch (e) {
+            console.error('getCaretCoordinates error:', e);
+            return { top: 0, left: 0 }; // Fallback to avoid breaking UX
+        }
+    }
+
     // Function to initialize fuzzy search for a given input or textarea element
+    // Breaks init into a reusable function for clarity and potential multiple editors
     function initializeFuzzySearch(element) {
         if (!element) {
             console.error('Element not found!');
@@ -13,7 +66,8 @@ document.addEventListener('DOMContentLoaded', function () {
         let pagesCache = null;
         let searchTimeout = null;
 
-        // Fetch pages and initialize Fuse.js
+        // Fetch pages and initialize Fuse.js with config from global var
+        // Error handling for fetch failures
         fetch(DOKU_BASE + 'lib/exe/ajax.php?call=fuzzysearch_pages', {
             method: 'GET',
             credentials: 'same-origin'
@@ -26,7 +80,7 @@ document.addEventListener('DOMContentLoaded', function () {
             pagesCache = pages;
             fuse = new Fuse(pagesCache, {
                 keys: ['title'],
-                threshold: 0.4,
+                threshold: FUZZYSEARCH_CONFIG.threshold, // Use admin-configured fuzziness
                 includeScore: true,
                 maxPatternLength: 32,
                 minMatchCharLength: 2
@@ -34,7 +88,7 @@ document.addEventListener('DOMContentLoaded', function () {
         })
         .catch(error => console.error('Initial fetch error:', error));
 
-        // Function to handle search logic
+        // Function to handle search logic with debounce for performance
         function handleInputChange() {
             if (searchTimeout) clearTimeout(searchTimeout);
 
@@ -43,10 +97,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 const text = element.value;
                 const match = text.substring(0, cursorPos).match(/\[\[([^\[\]]+)\]\]$/);
                 if (!match) {
-                    if (resultsDiv) {
-                        resultsDiv.remove();
-                        resultsDiv = null;
-                    }
+                    hideResults();
                     return;
                 }
 
@@ -61,27 +112,36 @@ document.addEventListener('DOMContentLoaded', function () {
                     return;
                 }
 
-                const results = fuse.search(phrase, { limit: 10 });
+                const results = fuse.search(phrase, { limit: FUZZYSEARCH_CONFIG.limit }); // Use admin-configured limit
                 displayResults(results, phrase, cursorPos);
-            }, 300); // Debounce delay
+            }, 300); // Debounce delay for smooth UX
         }
 
-        // Add event listeners
-        element.addEventListener('keyup', function (e) {
-            if (e.key === ']') {
-                handleInputChange();
-            }
-        });
-
-        element.addEventListener('input', handleInputChange);
-
-        element.addEventListener('compositionend', handleInputChange);
-
-        // Display results function
-        function displayResults(results, phrase, cursorPos) {
+        // Helper to hide results div safely
+        function hideResults() {
             if (resultsDiv) {
                 resultsDiv.remove();
+                resultsDiv = null;
             }
+        }
+
+        // Add event listeners with basic error handling
+        try {
+            element.addEventListener('keyup', function (e) {
+                if (e.key === ']') {
+                    handleInputChange();
+                }
+            });
+
+            element.addEventListener('input', handleInputChange);
+            element.addEventListener('compositionend', handleInputChange);
+        } catch (e) {
+            console.error('Event listener error:', e);
+        }
+
+        // Display results function - positions dropdown aesthetically near cursor
+        function displayResults(results, phrase, cursorPos) {
+            hideResults();
             if (results.length === 0) {
                 return;
             }
@@ -158,18 +218,26 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         function selectResult(pageId, phrase) {
+            // Preserve scroll position to prevent unwanted scrolling after insertion
+            const scrollTop = element.scrollTop;
+
             const text = element.value;
             const newLink = `[[${pageId}|${phrase}]]`;
             const start = text.lastIndexOf(`[[${phrase}]]`);
-            element.value = text.substring(0, start) + newLink + text.substring(start + phrase.length + 4);
-            if (resultsDiv) {
-                resultsDiv.remove();
-                resultsDiv = null;
-            }
-            lastPhrase = '';
+            const end = start + phrase.length + 4; // Length of [[phrase]]
+            element.value = text.substring(0, start) + newLink + text.substring(end);
+            
+            // Preserve focus and set cursor right after the new link for seamless editing
+            const newCursorPos = start + newLink.length;
+            element.setSelectionRange(newCursorPos, newCursorPos);
+            element.scrollTop = scrollTop; // Restore scroll position for consistent UX
             element.focus();
+
+            hideResults();
+            lastPhrase = '';
         }
 
+        // Keydown handler for navigation
         element.addEventListener('keydown', function (e) {
             if (!resultsDiv || resultsDiv.children.length === 0) return;
 
@@ -185,80 +253,21 @@ document.addEventListener('DOMContentLoaded', function () {
                     currentIndex--;
                     highlightResult(currentIndex);
                 }
-            } else if (e.key === 'Space' || e.key === 'Enter') {
+            } else if (e.key === 'Enter' && currentIndex >= 0) {
                 e.preventDefault();
-                if (currentIndex >= 0) {
-                    const selected = resultsDiv.children[currentIndex];
+                const selected = resultsDiv.children[currentIndex];
+                if (selected) {
                     selectResult(selected.dataset.id, lastPhrase);
                 }
             } else if (e.key === 'Escape') {
-                if (resultsDiv) {
-                    resultsDiv.remove();
-                    resultsDiv = null;
-                    lastPhrase = '';
-                }
+                hideResults();
             }
         });
-
-        document.addEventListener('click', function (e) {
-            if (resultsDiv && !resultsDiv.contains(e.target) && e.target !== element) {
-                resultsDiv.remove();
-                resultsDiv = null;
-                lastPhrase = '';
-            }
-        });
-
-        function getCaretCoordinates(element, position) {
-            const isTextarea = element.tagName.toLowerCase() === 'textarea';
-            const text = element.value.substring(0, position);
-            const font = window.getComputedStyle(element).font;
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-            context.font = font;
-
-            if (isTextarea) {
-                const lines = text.split('\n');
-                const lastLine = lines[lines.length - 1];
-                const width = context.measureText(lastLine).width;
-                const lineHeight = parseInt(font);
-                const top = (lines.length - 1) * lineHeight;
-                return { top: top, left: width };
-            } else {
-                // For input type="text", no line breaks, just measure the text width
-                const width = context.measureText(text).width;
-                const lineHeight = parseInt(font);
-                return { top: 0, left: width };
-            }
-        }
     }
 
-    // Target the main wiki editor textarea
-    const wikiTextarea = document.querySelector('textarea[name="wikitext"]');
-    if (wikiTextarea) {
-        initializeFuzzySearch(wikiTextarea);
+    // Initialize on the default DokuWiki editor textarea
+    const editor = document.querySelector('textarea#wiki__text');
+    if (editor) {
+        initializeFuzzySearch(editor);
     }
-
-    // Target Bureaucracy form textareas and textboxes
-    const bureaucracyElements = document.querySelectorAll('.bureaucracy__plugin textarea, .bureaucracy__plugin input[type="text"]');
-    bureaucracyElements.forEach(element => {
-        initializeFuzzySearch(element);
-    });
-
-    // Use MutationObserver to catch dynamically added Bureaucracy form elements
-    const observer = new MutationObserver((mutations) => {
-        mutations.forEach((mutation) => {
-            const newElements = mutation.target.querySelectorAll('.bureaucracy__plugin textarea, .bureaucracy__plugin input[type="text"]');
-            newElements.forEach(element => {
-                if (!element.dataset.fuzzyInitialized) {
-                    initializeFuzzySearch(element);
-                    element.dataset.fuzzyInitialized = 'true'; // Mark as initialized
-                }
-            });
-        });
-    });
-
-    observer.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
 });

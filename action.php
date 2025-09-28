@@ -3,17 +3,25 @@ if (!defined('DOKU_INC')) die();
 
 class action_plugin_fuzzysearch extends DokuWiki_Action_Plugin {
     private function getCacheFile() {
-        $user = $this->getCurrentUser();
-        if (!$user) return null;
-        $userHash = md5($user);
-        return DOKU_INC . 'data/cache/fuzzysearch_pages_' . $userHash . '.json';
+        if ($this->getConf('restrict_to_acl')) {
+            $user = $this->getCurrentUser();
+            if (!$user) return null;
+            $userHash = md5($user);
+            return DOKU_INC . 'data/cache/fuzzysearch_pages_' . $userHash . '.json';
+        } else {
+            return DOKU_INC . 'data/cache/fuzzysearch_pages_global.json';
+        }
     }
 
     private function getCacheMetaFile() {
-        $user = $this->getCurrentUser();
-        if (!$user) return null;
-        $userHash = md5($user);
-        return DOKU_INC . 'data/cache/fuzzysearch_pages_' . $userHash . '.meta.json';
+        if ($this->getConf('restrict_to_acl')) {
+            $user = $this->getCurrentUser();
+            if (!$user) return null;
+            $userHash = md5($user);
+            return DOKU_INC . 'data/cache/fuzzysearch_pages_' . $userHash . '.meta.json';
+        } else {
+            return DOKU_INC . 'data/cache/fuzzysearch_pages_global.meta.json';
+        }
     }
 
     public function register(Doku_Event_Handler $controller) {
@@ -47,14 +55,25 @@ class action_plugin_fuzzysearch extends DokuWiki_Action_Plugin {
     }
 
     public function update_cache_on_change(Doku_Event &$event, $param) {
-        if ($this->isLoggedIn()) {
+        if (!$this->getConf('restrict_to_acl') || $this->isLoggedIn()) {
             $this->ensureCacheExists(true);
         }
     }
 
     public function load_scripts(Doku_Event &$event, $param) {
+        // Log for debugging purposes
         error_log('FuzzySearch: Loading scripts');
-        // Load Fuse.js
+
+        // Inline config for JS to access plugin settings dynamically
+        $threshold = $this->getConf('fuse_threshold');
+        $limit = $this->getConf('fuse_limit');
+        $inlineScript = "var FUZZYSEARCH_CONFIG = { threshold: $threshold, limit: $limit };";
+        $event->data['script'][] = [
+            'type' => 'text/javascript',
+            '_data' => $inlineScript
+        ];
+
+        // Load Fuse.js (local for reliability)
         $fuseSrc = DOKU_BASE . 'lib/plugins/fuzzysearch/fuse.min.js';
         if (!in_array($fuseSrc, array_column($event->data['script'], 'src'))) {
             $event->data['script'][] = [
@@ -103,20 +122,24 @@ class action_plugin_fuzzysearch extends DokuWiki_Action_Plugin {
             return;
         }
 
-        $pages = $this->generatePageList();
-        $jsonData = json_encode($pages);
-        $metaData = ['last_updated' => time()];
+        try {
+            $pages = $this->generatePageList();
+            $jsonData = json_encode($pages);
+            $metaData = ['last_updated' => time()];
 
-        if (!is_dir(dirname($cacheFile))) {
-            mkdir(dirname($cacheFile), 0755, true);
+            if (!is_dir(dirname($cacheFile))) {
+                mkdir(dirname($cacheFile), 0755, true);
+            }
+
+            file_put_contents($cacheFile, $jsonData);
+            file_put_contents($cacheMetaFile, json_encode($metaData));
+        } catch (Exception $e) {
+            error_log('FuzzySearch: Cache generation error - ' . $e->getMessage());
         }
-
-        file_put_contents($cacheFile, $jsonData);
-        file_put_contents($cacheMetaFile, json_encode($metaData));
     }
 
     private function generatePageList() {
-        if (!$this->isLoggedIn()) {
+        if ($this->getConf('restrict_to_acl') && !$this->isLoggedIn()) {
             $this->redirectToLogin();
             exit;
         }
@@ -124,9 +147,10 @@ class action_plugin_fuzzysearch extends DokuWiki_Action_Plugin {
         $dir = DOKU_INC . 'data/pages/';
         $page_list = $this->getPageList($dir);
         $pages = [];
+        $restrict = $this->getConf('restrict_to_acl');
         foreach ($page_list as $file) {
             $id = pathID($file);
-            if (auth_quickaclcheck($id) >= AUTH_READ) {
+            if (!$restrict || auth_quickaclcheck($id) >= AUTH_READ) {
                 $title = p_get_first_heading($id) ?: noNS($id);
                 $pages[] = ['id' => $id, 'title' => $title];
             }
@@ -140,8 +164,12 @@ class action_plugin_fuzzysearch extends DokuWiki_Action_Plugin {
         while (false !== ($entry = $items->read())) {
             if ($entry === '.' || $entry === '..') continue;
             $path = $dir . $entry;
-            if (is_dir($path) && auth_quickaclcheck($base . $entry . ':') >= AUTH_READ) {
-                $files = array_merge($files, $this->getPageList($path . '/', $base . $entry . ':'));
+            if (is_dir($path)) {
+                // Check ACL for namespace if restricted (for efficiency)
+                $ns = $base . $entry . ':';
+                if (!$this->getConf('restrict_to_acl') || auth_quickaclcheck($ns) >= AUTH_READ) {
+                    $files = array_merge($files, $this->getPageList($path . '/', $ns));
+                }
             } elseif (preg_match('/\.txt$/', $entry)) {
                 $files[] = $base . substr($entry, 0, -4);
             }
